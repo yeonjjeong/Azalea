@@ -1,6 +1,7 @@
 #include <sys/lock.h>
 #include <sys/uio.h>
 #include <sys/stat.h>
+#include <limits.h>
 
 #include "console.h"
 #include "az_types.h"
@@ -634,4 +635,212 @@ QWORD mytid = -1;
 
   send_offload_message(ocq, mytid, SYSCALL_sys3_rewinddir, (QWORD) dirp, 0, 0, 0, 0, 0);
   receive_offload_message(icq, mytid, SYSCALL_sys3_rewinddir);
+}
+
+
+/**
+ * @brief readv system call
+ * @param fd file descriptor
+ * @param buf buffer
+ * @param count count bytes to read
+ * @return success (the number of bytes read), fail (-1)
+ */
+ssize_t sys_off_readv(int fd, const struct iovec *iov, int iovcnt)
+{
+channel_t *ch = NULL;
+struct circular_queue *icq = NULL;
+struct circular_queue *ocq = NULL;
+
+TCB *current = NULL;
+QWORD mytid = -1;
+
+ssize_t ret_count = 0;
+struct iovec iov_pa[MAX_IOV_NUM];
+int i = 0;
+
+  // check parameters
+  if(fd < 0 || iov == NULL || iovcnt <= 0)
+    return (-1);
+
+  ch = get_offload_channel(-1);
+  if(ch == NULL) return (-1);
+
+  icq = ch->in;
+  ocq = ch->out;
+
+  current = get_current(); 
+  mytid = current->id;
+
+  for(i = 0; i < iovcnt; i++) {
+    iov_pa[i].iov_base = (void *) get_pa((QWORD) iov[i].iov_base);
+    iov_pa[i].iov_len = (size_t) iov[i].iov_len;
+  }
+  
+  send_offload_message(ocq, mytid, SYSCALL_sys_readv, fd, get_pa((QWORD) iov_pa), iovcnt, 0, 0, 0); 
+  ret_count = receive_offload_message(icq, mytid, SYSCALL_sys_readv);
+
+  return (ret_count);
+}
+
+
+/**
+ * @brief execute writev system call
+ * write according to struct iovec data
+ * @param fd file descriptor
+ * @param iov iovec data
+ * @param iovcnt iovec count
+ * @return success (written bytes), fail (-1)
+ */
+ssize_t sys_off_writev(int fd, struct iovec *iov, int iovcnt)
+{
+channel_t *ch = NULL;
+struct circular_queue *icq = NULL;
+struct circular_queue *ocq = NULL;
+
+TCB *current = NULL;
+QWORD mytid = -1;
+
+ssize_t ret_count = 0;
+struct iovec iov_pa[MAX_IOV_NUM];
+int i = 0;
+
+  // check parameters
+  if(fd < 0 || iov == NULL || iovcnt <= 0)
+    return (-1);
+
+  ch = get_offload_channel(-1);
+  if(ch == NULL) return (-1);
+
+  icq = ch->in;
+  ocq = ch->out;
+
+  current = get_current();
+  mytid = current->id;
+
+  for(i = 0; i < iovcnt; i++) {
+    iov_pa[i].iov_base = (void *) get_pa((QWORD) iov[i].iov_base);
+    iov_pa[i].iov_len = (size_t) iov[i].iov_len;
+  }
+
+  send_offload_message(ocq, mytid, SYSCALL_sys_writev, fd, get_pa((QWORD) iov_pa), iovcnt, 0, 0, 0);
+  ret_count = receive_offload_message(icq, mytid, SYSCALL_sys_writev);
+
+  return (ret_count);
+}
+
+
+/**
+ * @brief file fstat system call
+ * @param file descriptor
+ * @param buf for struct stat
+ * @return success (0), fail (-1)
+ */
+int sys_off_fstat(int fd, struct stat *buf)
+{
+  int iret = 0;
+
+  channel_t *ch = NULL;
+  struct circular_queue *icq = NULL;
+  struct circular_queue *ocq = NULL;
+
+  TCB *current = NULL;
+  QWORD mytid = -1;
+      
+  // check parameters
+  if(fd < 0 || buf == NULL)
+    return (-1);
+
+  ch = get_offload_channel(-1);
+  if(ch == NULL) {
+    return (-1);
+  }
+
+  icq = ch->in;
+  ocq = ch->out;
+
+  current = get_current();
+  mytid = current->id;
+
+  send_offload_message(ocq, mytid, SYSCALL_sys_fstat, (QWORD) fd, get_pa((QWORD) buf), 0, 0, 0, 0);
+  iret = (int) receive_offload_message(icq, mytid, SYSCALL_sys_fstat);
+
+  return iret;
+}
+
+
+int memcpy64(void *destination, const void *source, int size)
+{
+  int i = 0;
+  int remain_byte = 0;
+
+  for (i=0; i<(size / 8); i++)
+    ((unsigned long *) destination)[i] = ((unsigned long *) source)[i];
+
+  remain_byte = i * 8;
+  for (i=0; i<(size % 8); i++) {
+    ((char *) destination)[remain_byte] = ((char *) source)[remain_byte];
+    remain_byte++;
+  }
+  return size;
+}
+
+int sys_getdents(unsigned int fd, struct dirent *dirp, unsigned int count)
+{
+channel_t *ch = NULL;
+struct circular_queue *icq = NULL;
+struct circular_queue *ocq = NULL;
+
+TCB *current = NULL;
+QWORD mytid = -1;
+
+int iret = -1;
+char buf[2048];
+struct dirent *tmp_dirp = NULL;
+int alloc_flag = 0;
+
+  // check parameter
+  if(fd < 0 || dirp == NULL || count <= 0)
+    return (-1);
+
+  ch = get_offload_channel(-1);
+  if(ch == NULL || dirp == NULL) {
+    return (-1);
+  }
+
+  icq = ch->in;
+  ocq = ch->out;
+
+  current = get_current(); 
+  mytid = current->id;
+
+  if (count > INT_MAX) count = INT_MAX;
+
+  if (count > 2048) {
+    tmp_dirp = (struct dirent *) az_alloc(count);
+    if(!tmp_dirp)
+      return -ENOMEM;
+
+    lk_memset(tmp_dirp, 0, count);
+    alloc_flag = 1;
+  }
+  else {
+    lk_memset(buf, 0, 2048);
+    tmp_dirp = (struct dirent *) buf;
+  }
+
+  send_offload_message(ocq, mytid, SYSCALL_sys_getdents, fd, get_pa((QWORD) tmp_dirp), count, 0, 0, 0);
+  iret = (int) receive_offload_message(icq, mytid, SYSCALL_sys_getdents);
+
+  if(iret != -1) {
+    memcpy64((void *) dirp, (const void *) tmp_dirp, iret);
+    //lk_memcpy(dirp, tmp_dirp, iret);
+#ifdef DEBUG
+    cs_printf("sys_getdents: iret=%d, d_ino=%d, d_off=%d, d_reclen=%di, d_name=%s\n", iret, dirp->d_ino, dirp->d_off, dirp->d_reclen, dirp->d_name);
+#endif
+  } 
+
+  if(tmp_dirp != NULL && alloc_flag == 1)
+    az_free(tmp_dirp);
+
+  return iret;
 }

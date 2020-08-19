@@ -63,8 +63,14 @@ void *console_proxy(void *args)
           case CONSOLE_EXIT: 
 	     g_console_proxy_runnable = 0;
              break;
+          case CONSOLE_TIMES:
+             console_off_times(console_channel);
+             break;
+          case CONSOLE_WRITEV:
+             console_off_writev(console_channel);
+             break;
           default :
-             printf("function type: unknown[%d]\n", (int) in_pkt->io_function_type);
+             printf("console function type: unknown[%d]\n", (int) in_pkt->io_function_type);
              break;
         }
       }

@@ -23,6 +23,14 @@
 #include "console_function.h"
 #include "shm/shm.h"
 
+#include "futex.h"
+#include "arch_prctl.h"
+#include "ioctl.h"
+#include "rt_sigaction.h"
+
+int fs_flag;
+unsigned long fs_addr;
+
 static spinlock_t a_lock;
 /**
  * initialize system call
@@ -132,7 +140,7 @@ QWORD process_systemcall(QWORD param1, QWORD param2, QWORD param3,
 #endif
     break;
   case SYSCALL_sys_write:
-#if 0
+#if 1
     ret_code = sys_off_write((int) param1, (void *) param2, (size_t) param3);
 #else
     if ( param1 == 1 || param1 == 2 ) { //stdout, stderr
@@ -229,7 +237,9 @@ QWORD process_systemcall(QWORD param1, QWORD param2, QWORD param3,
     ret_code = sys_sem_cancelablewait((sem_t *) param1, (unsigned int) param2);
     break;
   case SYSCALL_sys_clone:
-    ret_code = sys_clone((tid_t *) param1, (void *) param2, (void *) param3);
+    //ret_code = sys_clone((tid_t *) param1, (void *) param2, (void *) param3);
+    //int sys_clone(unsigned long clone_flags, void *stack, int *ptid, int *ctid, void *arg, void *ep)
+    ret_code = sys_clone((unsigned long) param1, (void *)param2, (int *)param3, (int *)param4, (void *)param5, (void *)param6);
     if (ret_code < 0)
       debug_halt((char *) __func__, no);
 #ifdef DDBUG
@@ -407,11 +417,119 @@ QWORD process_systemcall(QWORD param1, QWORD param2, QWORD param3,
   case SYSCALL_sys_shmctl:
     ret_code = (QWORD) shmctl((int) param1, (int) param2, (struct shmid_ds *) param3);
     break;
+
+// musl
+  case SYSCALL_sys_fstat:
+    ret_code = sys_off_fstat((int) param1, (struct stat *) param2);
+    break;
+  case __NR_arch_prctl:
+    cs_printf("arch_prctl: code:%q addr:%q, id:%d\n", param1, param2, get_current()->id);
+    ret_code =  sys_arch_prctl((int) param1, (unsigned long *) param2, NULL);
+    get_current()->tls = (void *) param2;
+    break ;
+  case __NR_set_tid_address:
+    //ret_code = 0 ;
+    //cs_printf("set_tid_address: %q\n", param1);
+    //sys_arch_prctl((int) fs_flag, (unsigned long *) fs_addr, NULL);
+    cs_printf("set_tid_address: %q\n", param1);
+    get_current()->clear_child_tid = (int *) param1;
+    
+    //sys_futex(get_current()->clear_child_tid, 0, *param1, NULL, NULL, 0);
+    ret_code = get_current()->id;
+    break ;
+  case __NR_exit_group:
+    cs_printf("exit_group syscall: %q\n", param1);
+    if(get_current()->clear_child_tid) {
+#define FUTEX_WAKE 1
+      //cs_printf("exit_group syscall: get_current()->tls:%q, &get_current()->tls:%q\n", get_current()->tls, &get_current()->tls);
+      *(int *)get_current()->clear_child_tid = 0;
+      sys_futex(get_current()->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
+    }
+    ret_code = 0 ;
+    break ;
+  case SYSCALL_get_syscall_handler:
+    ret_code = (QWORD) process_systemcall ;
+    break ;
+  case __NR_readv:
+    ret_code = sys_off_readv((int) param1, (void *) param2, (size_t) param3);
+    break ;
+  case __NR_writev:
+    //cs_printf("writev: fs: %q\n", getfs());
+    ret_code = 0 ;
+    if ( param1 == 1 || param1 == 2 ) { //stdout, stderr
+      ret_code = cs_writev((int) param1, (void *) param2, (size_t) param3);
+    }
+    else
+    {
+      ret_code = sys_off_writev((int) param1, (void *) param2, (size_t) param3);
+    }
+    break ;
+  case __NR_rt_sigaction:
+    ret_code = 0;
+    ret_code = sys_rt_sigaction((int) param1, (struct sigaction *) param2, (struct sigaction *) param3);
+    break ;
+  case __NR_ioctl:
+    ret_code = sys_ioctl((unsigned int) param1, (unsigned int) param2, (unsigned long) param3);
+    break ;
+  case __NR_mmap:
+    if((int)param5 == -1) { // fd == -1
+      //size_t len = (size_t) param2;
+      //cs_printf("mmap: len = %d, %q \n", (size_t) param2, (size_t) param2);
+      ret_code = (QWORD) az_alloc((size_t) param2);
+      //cs_printf("mmap: param5 %d len = %d, addr = %q\n", (int) param5, param2, ret_code);
+      //cs_printf("mmap: p1: %q, p2: %d, p3: %d, p4: %d, p5 %d, p6 %d \n", param1, (int) param2, param3, param4, param5, param6);
+      //cs_printf("mmap: addr: %q, len: %d, prot: %d, flag: %d, fd %d, off %d \n", param1, param2, param3, param4, param5, param6);
+    }
+    else {
+      ret_code = (QWORD) -1;
+    }
+    break ;
+  case __NR_munmap:
+    if((void *) param1 != NULL) {
+      az_free((void *) param1);
+      ret_code =  0;
+    }
+    else {
+      ret_code =  -1;
+    }
+    break ;
+  case __NR_times:
+    ret_code = cs_times((struct tms *)param1);
+    break ;
+  case __NR_fcntl:
+    //ret_code = (QWORD) sys3_off_system((char *)param1);
+    //ret_code = (QWORD) sys_fcntl((int)param1, (int) param2, (unsigned long) param3);
+    ret_code = 0;
+    break ;
+  case __NR_rt_sigprocmask:
+    ret_code = 0;
+    break ;
+  case __NR_mprotect:
+    ret_code = 0;
+    break ;
+  case __NR_nanosleep:
+    __asm volatile ("pause" ::: "memory");
+    ret_code = 0;
+    break ;
+  case SYSCALL_sys_futex:
+    ret_code = sys_futex((int *) param1, (int) param2, (int) param3, (const struct timespec *) param4, (int *)param5, (int) param6);
+    break ;
+  case SYSCALL_sys_getdents:
+    ret_code = (int) sys_getdents((unsigned int) param1, (struct dirent *) param2, (unsigned int) param3);
+    break ;
+  case SYSCALL_sys_getdents64:
+    ret_code = (int) sys_getdents((unsigned int) param1, (struct dirent *) param2, (unsigned int) param3);
+    break ;
+  case __NR_sched_setscheduler :
+    ret_code = 0;
+    break ;
   default:
+    cs_printf("Invalid system calls: %d\n", no);
     printk("Invalid system calls");
     debug_halt((char *) __func__, no);
     break;
   }
 
+  //cs_printf("system calls: %d\n", no);
   return ret_code;
 }

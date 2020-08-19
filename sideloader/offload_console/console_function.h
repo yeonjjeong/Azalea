@@ -7,10 +7,15 @@
 #define CONSOLE_PRINT   1
 #define CONSOLE_WRITE   2
 #define CONSOLE_GETCH   3
+#define CONSOLE_TIMES   4
+#define CONSOLE_WRITEV  5
 #define CONSOLE_EXIT	(-9)
 
 void console_off_write(struct channel_struct *ch);
 void console_print(struct channel_struct *ch);
 void console_getch(struct channel_struct *ch);
+
+void console_off_times(struct channel_struct *ch);
+void console_off_writev(struct channel_struct *ch);
 
 #endif /*__CONSOLE_FUNCTION_H__*/

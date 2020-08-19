@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <sys/uio.h>
 
 int sys_off_open(const char *path, int oflag, mode_t mode);
 int sys_off_creat(const char *path, mode_t mode);
@@ -22,5 +23,10 @@ int sys3_off_closedir(DIR *dirp);
 struct dirent *sys3_off_readdir(DIR *dirp);
 void sys3_off_rewinddir(DIR *dirp);
 DIR *sys3_off_opendir2(const char *name, DIR **pdir);
+
+ssize_t sys_off_readv(int fd, const struct iovec *iov, int iovcnt);
+ssize_t sys_off_writev(int fd, struct iovec *iov, int iovcnt);
+int sys_off_fstat(int fd, struct stat *buf);
+int sys_getdents(unsigned int fd, struct dirent *dirp, unsigned int count);
 
 #endif /*__OFFLOAD_FIO_H__*/

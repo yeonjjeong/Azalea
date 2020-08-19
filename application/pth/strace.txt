@@ -1,0 +1,25 @@
+pid=7193
+therad: 0, 7193
+0, 421093152
+therad: 1, 7193
+1, 420949792
+therad: 2, 7193
+2, 420806432
+therad: 3, 7193
+3, 420663072
+therad: 4, 7193
+4, 420519712
+thread: 0, result = 1.074105e+15
+thread: 2, result = 1.073268e+15
+thread: 1, result = 1.073022e+15
+thread: 4, result = 1.073172e+15
+Completed join with thread 4 status= 0
+thread: 3, result = 1.073439e+15
+Completed join with thread 3 status= 0
+thread: 2, result = 2.147162e+15
+Completed join with thread 2 status= 0
+thread: 0, result = 2.147844e+15
+thread: 1, result = 2.146769e+15
+Completed join with thread 1 status= 0
+thread: 0, result = 3.221270e+15
+Completed join with thread 0 status= 0

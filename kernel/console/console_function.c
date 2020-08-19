@@ -231,3 +231,104 @@ int cs_exit(void)
 
   return (iret);
 }
+
+
+/**
+ * @brief console time
+ * @param struct tms *
+ * @return clock_t
+ */
+clock_t cs_times(struct tms *buf)
+{
+channel_t *ch = NULL;
+struct circular_queue *icq = NULL;
+struct circular_queue *ocq = NULL;
+
+TCB *current = NULL;
+QWORD mytid = -1;
+
+clock_t cret = 0;
+
+  if(g_console_proxy_flag == FALSE)
+    return (-1);
+
+  if(buf == NULL)
+    return (-1);
+
+  ch = get_console_channel();
+  if(ch == NULL)
+    return (-1);
+
+  icq = ch->in;
+  ocq = ch->out;
+
+  current = get_current();
+  if(current == NULL) {
+    mytid = -1;
+  }
+  else {
+    mytid = current->id;
+  }
+
+  send_console_message(ocq, mytid, CONSOLE_TIMES, get_pa((QWORD)buf), 0, 0, 0, 0, 0);
+  cret= receive_console_message(icq, mytid, CONSOLE_TIMES);
+
+  return (cret);
+}
+
+
+/**
+ * @brief execute writev console call
+ * do write according to struct iovec data
+ * @param fd file descriptor
+ * @param iov_pa iovec data
+ * @param iovcnt iovec count
+ * @return success (written bytes), fail (-1)
+ */
+ssize_t cs_writev(int fd, struct iovec *iov_param, int iovcnt_param)
+{
+channel_t *ch = NULL;
+struct circular_queue *icq = NULL;
+struct circular_queue *ocq = NULL;
+
+TCB *current = NULL;
+QWORD mytid = -1;
+
+ssize_t ret_count = 0;
+
+struct iovec iov[MAX_IOV_NUM];
+int iovcnt = 0;
+int i = 0;
+
+  if(g_console_proxy_flag == FALSE)
+    return (-1);
+
+  if(iov_param == NULL || iovcnt_param <= 0)
+    return (-1);
+
+  ch = get_console_channel();
+  if(ch == NULL)
+     return (-1);
+
+  icq = ch->in;
+  ocq = ch->out;
+
+  current = get_current();
+  if(current == NULL) {
+    mytid = -1;
+  }
+  else {
+    mytid = current->id;
+  }
+
+  for(i = 0; i < iovcnt_param; i++) {
+    iov[i].iov_base = (void *) get_pa((QWORD) iov_param[i].iov_base);
+    iov[i].iov_len = (size_t) iov_param[i].iov_len;
+  }
+  iovcnt = iovcnt_param;
+
+  send_console_message(ocq, mytid, CONSOLE_WRITEV, fd, get_pa((QWORD) iov), iovcnt, 0, 0, 0);
+  ret_count = (ssize_t) receive_console_message(icq, mytid, CONSOLE_WRITEV);
+
+  return (ret_count);
+}

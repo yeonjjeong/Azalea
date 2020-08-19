@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <sys/syscall.h>
 
 #include "offload_channel.h"
 #include "offload_fio.h"
@@ -804,5 +805,191 @@ void sys3_off_rewinddir(job_args_t *job_args)
   // retrun ret
   pthread_mutex_lock(&ch->mutex);
   send_offload_message(out_cq, tid, offload_function_type, (unsigned long) 0);
+  pthread_mutex_unlock(&ch->mutex);
+}
+
+
+/**
+ * @brief execute fstat system call 
+ * @param channel 
+ * @return none
+ */
+void sys_off_fstat(job_args_t *job_args)
+{
+  struct circular_queue *out_cq = NULL;
+  io_packet_t *in_pkt = NULL;
+
+  int  iret = -1;
+
+  int fd = -1;;
+  struct stat *buf = NULL;
+
+  int tid = 0;
+  int  offload_function_type = 0;
+
+  struct channel_struct *ch;
+  ch = job_args->ch;
+  out_cq = job_args->ch->out_cq;
+  in_pkt = (io_packet_t *) &job_args->pkt;
+
+  tid = (int) in_pkt->tid;
+  offload_function_type = (int) in_pkt->io_function_type;
+
+  fd = (int) in_pkt->param1;
+  buf = (struct stat *) get_va(in_pkt->param2);
+
+  // execute unlink
+  iret = fstat(fd, buf);
+
+  // check error
+  if(iret == -1)
+    fprintf(stderr, "FIO FSTAT: %s, %d\n", strerror(errno), fd);
+
+  // retrun ret
+  pthread_mutex_lock(&ch->mutex);
+  send_offload_message(out_cq, tid, offload_function_type, (unsigned long) iret);
+  pthread_mutex_unlock(&ch->mutex);
+}
+
+/**
+ * @brief execute write system call
+ * @param channel 
+ * @return none
+ */
+void sys_off_readv(job_args_t *job_args)
+{
+  struct circular_queue *out_cq = NULL;
+  io_packet_t *in_pkt = NULL;
+
+  ssize_t sret = 0;
+
+  int fd = 0;
+  unsigned long pa = 0;
+  int count = 0;
+
+  int tid = 0;
+  int  offload_function_type = 0;
+
+  struct channel_struct *ch;
+  ch = job_args->ch;
+  out_cq = job_args->ch->out_cq;
+  in_pkt = (io_packet_t *) &job_args->pkt;
+
+  tid = (int) in_pkt->tid;
+  offload_function_type = (int) in_pkt->io_function_type;
+
+  fd = (int) in_pkt->param1;
+  pa = (unsigned long) in_pkt->param2;
+  count = (int) in_pkt->param3;
+
+  // execute read
+
+#if 1
+  sret = do_sys_off_read_v(fd, pa, count);
+#else
+  sret = read(fd, (void *) get_va(pa), (size_t) count);
+#endif
+
+  // check error
+  if(sret  == -1)
+	fprintf(stderr, "FIO READ: %s, fd: %d, pa: %lx\n", strerror(errno), fd, pa);
+
+  // retrun ret
+  pthread_mutex_lock(&ch->mutex);
+  send_offload_message(out_cq, tid, offload_function_type, (unsigned long) sret);
+  pthread_mutex_unlock(&ch->mutex);
+}
+
+
+/**
+ * @brief execute write system call
+ * write()  writes  up  to  count bytes from the buffer pointed buf 
+ * to the file referred to by the file descriptor fd.
+ * @param channel 
+ * @return none
+ */
+void sys_off_writev(job_args_t *job_args)
+{
+  struct circular_queue *out_cq = NULL;
+  io_packet_t *in_pkt = NULL;
+
+  ssize_t sret = -1;
+
+  int fd = 0;
+  unsigned long pa = 0;
+  int count = 0;
+
+  int tid = 0;
+  int  offload_function_type = 0;
+
+  struct channel_struct *ch;
+  ch = job_args->ch;
+  out_cq = job_args->ch->out_cq;
+  in_pkt = (io_packet_t *) &job_args->pkt;
+
+  tid = (int) in_pkt->tid;
+  offload_function_type = (int) in_pkt->io_function_type;
+
+  fd = (int) in_pkt->param1;
+  pa = (unsigned long) in_pkt->param2;
+  count = (int) in_pkt->param3;
+
+  // execute write
+#if 1
+  sret = do_sys_off_write_v(fd, pa, count);
+#else
+  sret = write(fd, (void *) get_va(pa), (size_t) count);
+#endif
+
+  // check error
+  if(sret == -1)
+	fprintf(stderr, "FIO WRITE: %s, fd: %d, pa: %lx\n", strerror(errno), fd, pa);
+
+  pthread_mutex_lock(&ch->mutex);
+  send_offload_message(out_cq, tid, offload_function_type, (unsigned long) sret);
+  pthread_mutex_unlock(&ch->mutex);
+}
+
+
+void sys_off_getdents(job_args_t *job_args)
+{
+  struct circular_queue *out_cq = NULL;
+  io_packet_t *in_pkt = NULL;
+
+  int fd = 0;
+  struct dirent *dirp = NULL;
+  unsigned int count = 0;
+
+  int iret = -1;
+
+  int tid = 0;
+  int  offload_function_type = 0;
+
+  struct channel_struct *ch;
+  ch = job_args->ch;
+  out_cq = job_args->ch->out_cq;
+  in_pkt = (io_packet_t *) &job_args->pkt;
+
+  tid = (int) in_pkt->tid;
+  offload_function_type = (int) in_pkt->io_function_type;
+
+  fd = (int) in_pkt->param1;
+  dirp = (struct dirent *) get_va(in_pkt->param2);
+  count = (unsigned int) in_pkt->param3;
+
+  // execute closedir 
+  iret = syscall(SYS_getdents, fd, dirp, count);
+
+  // check error
+  if(iret == -1) {
+    fprintf(stderr, "FIO GETDENTS: %s\n", strerror(errno));
+  }
+#ifdef DEBUG
+  printf("sys_getdents: iret=%d, d_ino=%d, d_off=%d, d_reclen=%di, d_name=%s\n", iret, dirp->d_ino, dirp->d_off, dirp->d_reclen, dirp->d_name);
+#endif
+
+  // retrun ret
+  pthread_mutex_lock(&ch->mutex);
+  send_offload_message(out_cq, tid, offload_function_type, (unsigned long) iret);
   pthread_mutex_unlock(&ch->mutex);
 }

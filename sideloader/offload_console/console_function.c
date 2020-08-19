@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/times.h>
 
 #include "console_channel.h"
 #include "console_function.h"
@@ -21,7 +22,7 @@
  * @param iovcnt iovec count
  * @return success (written bytes), fail (-1)
  */
-ssize_t do_console_off_write_v(int fd, unsigned long iov_pa, int iovcnt)
+ssize_t console_off_do_writev(int fd, unsigned long iov_pa, int iovcnt)
 {
   ssize_t writebytes = 0;
   ssize_t count = 0;
@@ -32,6 +33,10 @@ ssize_t do_console_off_write_v(int fd, unsigned long iov_pa, int iovcnt)
   int i = 0;
 
   iov = (struct iovec *) get_va(iov_pa);
+
+  if(!iov) {
+    count = write(fd, (void *) iov_pa, (size_t) iovcnt);
+  }
 
   for(i = 0; i < iovcnt; i++) {
     iov_base_va = get_va((unsigned long) iov[i].iov_base);
@@ -95,7 +100,7 @@ void console_off_write(struct channel_struct *ch)
   in_cq->tail = (in_cq->tail + 1) % in_cq->size;
  
   // execute write console
-  sret = do_console_off_write_v(fd, iov_pa, iovcnt);
+  sret = console_off_do_writev(fd, iov_pa, iovcnt);
 
   // check error
   if(sret == -1)
@@ -214,3 +219,138 @@ void console_getch(struct channel_struct *ch)
   send_console_message(out_cq, tid, console_function_type, (unsigned long) cret);
 }
 
+/**
+ * @brief execute time console call
+ * @param struct tms *
+ * @return success (the  number  of  clock ticks)  fail (-1)
+ */
+void console_off_times(struct channel_struct *ch)
+{
+  struct circular_queue *in_cq = NULL;
+  struct circular_queue *out_cq = NULL;
+  io_packet_t *in_pkt = NULL;
+
+  clock_t cret = -1;
+
+  struct tms *buf;
+
+  int tid = 0;
+  int  console_function_type = 0;
+
+  in_cq = ch->in_cq;
+  out_cq = ch->out_cq;
+  in_pkt = (io_packet_t *) (in_cq->data + in_cq->tail);
+
+  tid = (int) in_pkt->tid;
+  console_function_type = (int) in_pkt->io_function_type;
+
+  buf = (struct tms *) get_va(in_pkt->param1);
+
+  in_cq->tail = (in_cq->tail + 1) % in_cq->size;
+
+  cret = times(buf);
+
+  if(cret == -1)
+    fprintf(stdout, "CONSOLE TIMES: %s\n", strerror(errno));
+
+  send_console_message(out_cq, tid, console_function_type, (unsigned long) cret);
+}
+
+#if 0
+/**
+ * @brief do writev
+ * do write according to struct iovec data
+ * @param fd file descriptor
+ * @param iov_pa iovec data
+ * @param iovcnt iovec count
+ * @return success (written bytes), fail (-1)
+ */
+ssize_t console_off_do_writev(int fd, unsigned long iov_pa, int iovcnt)
+{
+  ssize_t writebytes = 0;
+  ssize_t count = 0;
+
+  struct iovec *iov = NULL;
+  unsigned long iov_base_va = 0;
+
+  int i = 0;
+
+  iov = (struct iovec *) get_va(iov_pa);
+
+  if(!iov) {
+    count = write(fd, (void *) iov_pa, (size_t) iovcnt);
+  }
+
+  //printf("cs_do_writev fd:%d, iov%02d: iov pa: %lx, va: %lx \n",fd, 0,  (unsigned long) iov_pa, (unsigned long) iov);
+  for(i = 0; i < iovcnt; i++) {
+    iov_base_va = get_va((unsigned long) iov[i].iov_base);
+  //printf("cs_do_writev fd:%d, iov%02d: iov pa: %lx, va: %lx \n",fd, i+1, (unsigned long) iov[i].iov_base, (unsigned long) iov_base_va);
+    count = write(fd, (void *) iov_base_va, (size_t) iov[i].iov_len);
+
+    if(count == -1) {
+      return -1;
+    }
+
+    if(fd == 1)
+      fflush(stdout);
+    else if(fd == 2)
+      fflush(stderr);
+
+    if(count < iov[i].iov_len) {
+      writebytes += count;
+      return writebytes;
+    }
+
+    writebytes += count;
+  }
+
+  return writebytes;
+}
+#endif
+
+/**
+ * @brief execute writev console call
+ * do write according to struct iovec data
+ * @param fd file descriptor
+ * @param iov_pa iovec data
+ * @param iovcnt iovec count
+ * @return success (written bytes), fail (-1)
+ */
+void console_off_writev(struct channel_struct *ch)
+{
+  struct circular_queue *in_cq = NULL;
+  struct circular_queue *out_cq = NULL;
+  io_packet_t *in_pkt = NULL;
+
+  ssize_t sret = -1;
+
+  int fd = 0;
+  unsigned long iov_pa = 0;
+  int iovcnt = 0;
+
+  int tid = 0;
+  int  console_function_type = 0;
+
+  in_cq = ch->in_cq;
+  out_cq = ch->out_cq;
+  in_pkt = (io_packet_t *) (in_cq->data + in_cq->tail);
+
+  tid = (int) in_pkt->tid;
+  console_function_type = (int) in_pkt->io_function_type;
+
+  fd = (int) in_pkt->param1;
+  iov_pa = (unsigned long) in_pkt->param2;
+  iovcnt = (int) in_pkt->param3;
+
+  // empty in_cq
+  in_cq->tail = (in_cq->tail + 1) % in_cq->size;
+
+  // execute write console
+  sret = console_off_do_writev(fd, iov_pa, iovcnt);
+
+  // check error
+  if(sret == -1)
+    fprintf(stdout, "CONSOLE WRITE: %s, %d\n", strerror(errno), fd);
+
+  send_console_message(out_cq, tid, console_function_type, (unsigned long) sret);
+}

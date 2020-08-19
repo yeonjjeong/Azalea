@@ -20,6 +20,7 @@
 #include "signal.h"
 #include "stat.h"
 #include "console_function.h"
+#include "futex.h"
 
 extern void HALT() ;
 unsigned int shutdown_kernel = 0 ;
@@ -345,6 +346,23 @@ static atomic_t trcnt;
 static void destroy_tcb(TCB *t)
 {
 #if 1
+  if (per_cpu(runnable_list).count + per_cpu(blocked_list).count + per_cpu(local_tcb_list).count > RUNNABLE_MAX) {
+    spinlock_lock(&g_global_tcb_list.lock);
+    dl_list_add_tail(&t->tcb_link, &g_global_tcb_list.tcb_list);
+    g_global_tcb_list.count++;
+    mfence();
+    init_tcb(t, 0, THREAD_INIT_DESTROY);
+    t->gen++;
+    spinlock_unlock(&g_global_tcb_list.lock);
+  }
+  else {
+    init_tcb(t, 0, THREAD_INIT_DESTROY);
+    t->gen++;
+    dl_list_add_tail(&t->tcb_link, &per_cpu(local_tcb_list).tcb_list);
+    per_cpu(local_tcb_list).count++;
+  }
+#else
+#if 1
   if (per_cpu(local_tcb_list).count > 1 && spinlock_trylock(&g_global_tcb_list.lock)) {
     // if local_tcb_list is not empty and g_global_tcb_list is race free,
     // then insert free tcb to the g_global_tcb_list
@@ -376,12 +394,14 @@ static void destroy_tcb(TCB *t)
   }
 #else
   spinlock_lock(&g_global_tcb_list.lock);
-  list_insert_tail(&t->tcb_link, &g_global_tcb_list.tcb_list);
+  //list_insert_tail(&t->tcb_link, &g_global_tcb_list.tcb_list);
+  dl_list_add_tail(&t->tcb_link, &g_global_tcb_list.tcb_list);
   g_global_tcb_list.count++;
   mfence();
   init_tcb(t, 0, THREAD_INIT_DESTROY);
   t->gen++;
   spinlock_unlock(&g_global_tcb_list.lock);
+#endif
 #endif
 
   atomic_inc(&g_exit_thread_cnt);
@@ -513,6 +533,14 @@ int __thread_exit(int tid)
   tcb->name = THREAD_INIT_NAME;
 
   put_tcb(tcb);
+
+
+ if(get_current()->clear_child_tid) {
+   *(int *)(get_current()->clear_child_tid) = 0;
+#define FUTEX_WAKE 1
+   sys_futex(get_current()->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
+ }
+
   schedule(THREAD_INTENTION_EXITED);
 
   return 0;
@@ -716,6 +744,68 @@ int create_thread(QWORD ip, QWORD argv, int core_mask)
   return thr->id;
 }
 
+
+int clone_thread(QWORD ip, QWORD argv, int core_mask, void *set_child_tid, void *clear_child_tid, void* tls)
+{
+  TCB *thr = NULL;
+  void *stack_address;
+  core_set_t cst;
+
+  lk_memset(&cst, 0, sizeof(core_set_t));
+
+#if 0  
+  if (task->thread_count.c >= MAX_NUM_THREAD)
+    debug_halt((char *)__func__, __LINE__);
+#endif
+
+  // TODO: If fail ????
+  thr = alloc_tcb();
+
+  get_tcb(thr->id);
+
+  tcb_lock(thr);
+
+  stack_address = az_alloc(CONFIG_STACK_SIZE);
+  lk_print("Thread created: %d, stack: %q, %q\n", thr->id, stack_address, thr->stack);
+
+  init_tcb(thr, (QWORD) stack_address, THREAD_INIT_CREATE);
+  
+  thr->running_core = core_mask;
+  set_core(thr, &cst, core_mask);
+
+  thr->set_child_tid = set_child_tid;
+  thr->clear_child_tid =  clear_child_tid;
+  thr->tls = tls;
+
+  // Initialize context of the thread
+  if (ip == 0)
+    setup_thread(thr, THREAD_KERNEL, (QWORD) elf_load_entry, stack_address, argv);
+  else
+    setup_thread(thr, THREAD_KERNEL, ip, stack_address, argv);
+
+  // add migrating list
+  spinlock_lock(&g_migrating_list.lock);
+
+  dl_list_add_tail(&thr->tcb_link, &g_migrating_list.tcb_list);
+  g_migrating_list.count++;
+  thr->sched_list = &g_migrating_list;
+  thr->state = THREAD_STATE_READY;
+
+  spinlock_unlock(&g_migrating_list.lock);
+
+  tcb_unlock(thr);
+
+  put_tcb(thr);
+
+  // count thread create
+  atomic_inc(&g_thread_cnt);
+
+  atomic_inc(&trcnt);
+  lk_print_xy(50, 23, "tc: %q, td: %q, %q  ", trcnt.c, tdcnt.c, trcnt.c-tdcnt.c);
+
+  return thr->id;
+}
+
 /**
  * @brief Execute unikernel application
  * @param app_ptr - application memory addr.
@@ -761,9 +851,12 @@ static TCB *select_next_thread(void)
   int found = 0;
   TCB *next_tcb = NULL, *tmp_ptr = NULL, *found_tcb = NULL;
   int cid = get_current()->running_core;
+  int refilled = 0;
+
+  found = 0;
+  refilled = 0;
 
 retry:
-  found = 0;
   dl_list_for_each_safe(next_tcb, tmp_ptr, &per_cpu(runnable_list).tcb_list, TCB, tcb_link) {
     tcb_lock(next_tcb);
 
@@ -772,11 +865,9 @@ retry:
     // Move to-be-EXITED thread in the runnable and blocked list to the free list
     if (atomic_get(&next_tcb->intention) & THREAD_INTENTION_EXITED) {
 
-      // and if prev=next, schedule idle thread
-      if (get_current()->id == next_tcb->id) {
-        refill_time_slice(g_idle_thread_list[cid]);
-
-        return g_idle_thread_list[cid];
+      if(get_current() == next_tcb) {
+        tcb_unlock(next_tcb);
+        continue;
       }
 
       if (thread_exit(next_tcb) == -1) {
@@ -793,6 +884,12 @@ retry:
       put_tcb(next_tcb);
       continue;
     } else if (atomic_get(&next_tcb->intention) & THREAD_INTENTION_BLOCKED) {
+
+      if(get_current() == next_tcb) {
+        tcb_unlock(next_tcb);
+        continue;
+      }
+
       per_cpu(runnable_list).count--;
       dl_list_del_init(&next_tcb->tcb_link);
 
@@ -834,26 +931,32 @@ retry:
   }
 
   if (!found) {
-    int refilled = 0;
 
-   // if there are threads ready with no time slice in the runnable list, then refill the time slice
-    dl_list_for_each(next_tcb, &per_cpu(runnable_list).tcb_list, TCB, tcb_link) {
-      tcb_lock(next_tcb);
-      if (next_tcb->state == THREAD_STATE_READY && next_tcb->remaining_time_slice <= 0) {
-        refill_time_slice(next_tcb);
-        refilled = 1;
+    if(!refilled) {
+      // if there are threads ready with no time slice in the runnable list, then refill the time slice
+      dl_list_for_each(next_tcb, &per_cpu(runnable_list).tcb_list, TCB, tcb_link) {
+        tcb_lock(next_tcb);
+        if (next_tcb->state == THREAD_STATE_READY && next_tcb->remaining_time_slice <= 0) {
+          refill_time_slice(next_tcb);
+          refilled = 1;
+        }
+        tcb_unlock(next_tcb);
       }
-      tcb_unlock(next_tcb);
+ 
+      if (refilled)
+        goto retry;
     }
 
-    if (refilled)
-      goto retry;
-
     // if there is only one thread in runnable list, then select it
-    if (per_cpu(runnable_list).count == 1)
-      found_tcb = dl_list_first(&per_cpu(runnable_list).tcb_list, TCB, tcb_link);
-    else
+    //if (per_cpu(runnable_list).count == 1) {
+    if (atomic_get(&get_current()->intention) & THREAD_INTENTION_READY) {
+      found_tcb = get_current();
+      g_running_thread_list[cid] = found_tcb;
+    }
+    else {
+      refill_time_slice(g_idle_thread_list[cid]);
       found_tcb = g_idle_thread_list[cid];
+    }
   }
 
   return found_tcb;
@@ -1219,17 +1322,28 @@ BOOL schedule(QWORD intention)
   atomic_set(&curr->intention, intention | atomic_get(&curr->intention));
   tcb_unlock(curr);
 
+  if(curr->tls && curr->id > 287) {
+    //cs_printf("(1)curr id: %d, tls: %q \n", curr->id, curr->tls);
+  }
+  //cs_printf("curr id: %d, tls: %q \n", curr->id, curr->tls);
+
   next = select_next_thread();
   // if there is no or one thread in runnable list, next == curr
   if (next == curr) {
     refill_time_slice(curr);
     lapic_start_timer_oneshot(curr->remaining_time_slice);
 
+    if(curr->tls && curr->id > 287) {
+      //cs_printf("(2)curr id: %d, tls: %q \n", curr->id, curr->tls);
+      //asm volatile("mov %0, %%fs:0" :: "r"(curr->tls) : "memory");
+    }
+
     post_context_switch(curr);
     curr->state = THREAD_STATE_RUNNING;
 
     // free intention
     atomic_set(&curr->intention, atomic_get(&curr->intention) &  ~(THREAD_INTENTION_READY));
+
 
     return TRUE;
   }
@@ -1242,9 +1356,15 @@ BOOL schedule(QWORD intention)
   next->running_core = cid;
   running_thread[get_apic_id()] = next;
 
+  if(curr->tls && curr->id > 287) {
+    //cs_printf("(3)curr id: %d, tls: %q \n", curr->id, curr->tls);
+    //asm volatile("mov %0, %%fs:0" :: "r"(curr->tls) : "memory");
+  }
+
   prev = context_switch(curr, next);
 
   post_context_switch(prev);
+
 
   // signal handling
   if (curr->signal_flag != 0) {
@@ -1306,8 +1426,11 @@ BOOL schedule_to(int next_tid, QWORD intention)
     lapic_start_timer_oneshot(next->remaining_time_slice);
 
     if (unlikely(next == curr)) {
-      curr->state = THREAD_STATE_RUNNING;
       post_context_switch(curr);
+      curr->state = THREAD_STATE_RUNNING;
+
+      // free intention
+      atomic_set(&curr->intention, atomic_get(&curr->intention) &  ~(THREAD_INTENTION_READY));
 
       return TRUE;
     }
@@ -1437,6 +1560,12 @@ void set_core(TCB *tcb, core_set_t *cst, int core)
  */
 void do_exit(int arg)
 {
+
+ if(get_current()->clear_child_tid) {
+   *(int *)(get_current()->clear_child_tid) = 0;
+#define FUTEX_WAKE 1
+   sys_futex(get_current()->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
+ }
   __thread_exit(arg);
 }
 
@@ -1519,21 +1648,53 @@ void sys_exit(int arg)
  * @param argv - parameters want to pass to create thread
  * @return Success (0), fail (-1)
  */
-int sys_clone(tid_t *id, void *ep, void *argv)
+#define CLONE_VM                        0x00000100
+#define CLONE_CHILD_CLEARTID    	0x00200000
+#define CLONE_CHILD_SETTID              0x01000000
+
+int sys_clone(unsigned long clone_flags, void *stack, int *ptid, int *ctid, void *arg, void *ep)
 {
   tid_t tid;
+  TCB *tcb = get_current();
 
-  tid = create_thread((QWORD) ep, (QWORD) argv, -1);
+  void *set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? ctid : NULL;
+  void *clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? ctid : NULL;
 
-  if (tid) {
-    if (id != NULL) 
-      *id = tid;
+  tcb->set_child_tid = set_child_tid;
+  tcb->clear_child_tid = clear_child_tid;
 
-    return 0;
-  } else {
+  cs_printf("\nsys_clone(): set_child_tid %q, clear_chile_tid %q\n", (QWORD) set_child_tid, (QWORD) clear_child_tid);
+
+  cs_printf("sys_clone(): tls: %q\n", (QWORD) arg);
+  //tcb->tls = (void *) arg;
+
+  asm volatile("mov %0, %%fs:0" :: "r"(arg) : "memory");
+
+  tid = clone_thread((QWORD) ep, (QWORD) stack+0x10, -1, set_child_tid, clear_child_tid, arg);
+
+  cs_printf("sys_clone(id:%d): clone_flags: %q, stack:%q, ptid: %q, ctid: %q, arg: %q, ep:%q \n", tid, (QWORD) clone_flags, (QWORD)stack, (QWORD) ptid, (QWORD) ctid, (QWORD) arg, (QWORD)ep);
+
+  //cs_printf("\nsys_clone ptid addr: %q, ptid: %q \n", (QWORD) ptid, (QWORD) *ptid);
+
+  if(tid) {
+
+    if(ptid) {
+     *(unsigned int *)ptid = tid;
+    }
+
+    if(clone_flags & CLONE_CHILD_SETTID) {
+      if (ctid) {
+        *(int *)ctid = tid;
+      }
+    }
+
+    return tid;
+  }
+  else {
     return -1;
   }
 }
+
 
 /** 
  * @brief Yield systemcall

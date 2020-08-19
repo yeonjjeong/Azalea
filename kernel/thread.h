@@ -61,7 +61,7 @@
 #define THREAD_DEFAULT_TIME_QUANTUM   THREAD_INFINITE_TIME_QUANTUM
 #define THREAD_DEFAULT_TIME_SLICE     (10)
 #define THREAD_IDLE_THREAD_TIME_SLICE (10)
-#define RUNNABLE_MAX		      2048
+#define RUNNABLE_MAX			100
 #endif
 
 #define THREAD_INIT_NAME	      (~0x0)
@@ -163,6 +163,11 @@ typedef struct thread_control_block_struct {
   QWORD acc_ltc;
   core_set_t core_mask;
 
+  void *set_child_tid;
+  void *clear_child_tid;
+  void *prev_tls;
+  void *tls;
+
   // Sched list
   struct thread_list *sched_list;
   struct dl_list tcb_link;
@@ -177,6 +182,7 @@ typedef struct thread_control_block_struct {
 
 // Functions
 int create_thread(QWORD ip, QWORD argv, int core_mask);
+int create_thread_with_stack(QWORD ip, QWORD argv, QWORD stack, int core_mask);
 
 void sched_init(void);
 void thread_init(void);
@@ -238,7 +244,8 @@ tid_t sys_getpid(void);
 int sys_getprio(tid_t *id);
 int sys_setprio(tid_t *id, int prio);
 void sys_exit(int arg);
-int sys_clone(tid_t *id, void *ep, void *argv);
+//int sys_clone(tid_t *id, void *ep, void *argv);
+int sys_clone(unsigned long clone_flags, void *stack, int *ptid, int *ctid, void *arg, void *ep);
 void sys_yield(void);
 
 #endif  /* __THREAD_H__ */

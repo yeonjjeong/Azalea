@@ -1,0 +1,87 @@
+#include <pthread.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+//void t_function(void *data)
+void t_function()
+{
+    pid_t pid;            // process id
+    pthread_t tid;        // thread id
+ 
+    printf("==>thread \n");
+    //printf("==>thread %d %s\n", getpid(), (char *) data);
+#if 0
+    //pid = getpid();
+    //tid = pthread_self();
+    char* thread_name = (char*)data;
+    int i = 0;
+
+    while (i<3)   // 0,1,2 까지만 loop 돌립니다.
+    {
+        //printf("[%s] pid:%u, tid:%x --- %d\n", thread_name, (unsigned int)pid, (unsigned int)tid, i);
+        printf("[%s] --- %d\n", thread_name, i);
+        i++;
+        sleep(1);  // 1초간 대기
+    }
+#endif
+}
+
+#define __ATTRP_C11_THREAD ((void*)(uintptr_t)-1)
+
+int main()
+{
+    pthread_t p_thread[2];
+    int thr_id;
+    unsigned long status;
+    char p1[] = "thread_1";   // 1번 쓰레드 이름
+    char p2[] = "thread_2";   // 2번 쓰레드 이름
+    char pM[] = "thread_m";   // 메인 쓰레드 이름
+
+    //sleep(1);  // 2초 대기후 쓰레드 생성
+
+    printf("begin\n");
+
+    //thr_id = pthread_create(&p_thread[0], NULL, t_function, (void *)p1);
+    thr_id = pthread_create(&p_thread[0], NULL, t_function, NULL);
+    //thr_id = pthread_create(&p_thread[0], __ATTRP_C11_THREAD, t_function, (void *)p1);
+
+
+    printf("create 1: id: %d, 0x%lx\n", p_thread[0], p_thread[0]);
+
+
+    if (thr_id < 0)
+    {
+        perror("thread create error : ");
+        exit(0);
+    }
+
+#if 0 
+
+    thr_id = pthread_create(&p_thread[1], NULL, t_function, (void *)p2);
+
+    printf("create 2: id: %d, 0x%lx\n", p_thread[1], p_thread[1]);
+
+    if (thr_id < 0)
+    {
+        perror("thread create error : ");
+        exit(0);
+    }
+ 
+    printf("join\n");
+    //t_function((void *)pM);
+
+    //pthread_join(p_thread[0], (void **)&status);
+    //pthread_join(p_thread[1], (void **)&status);
+ 
+#endif
+    printf("end\n");
+    return 0;
+}
+
+
+
+
+
+
