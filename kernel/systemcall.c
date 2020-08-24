@@ -27,9 +27,7 @@
 #include "arch_prctl.h"
 #include "ioctl.h"
 #include "rt_sigaction.h"
-
-int fs_flag;
-unsigned long fs_addr;
+#include "thread_area.h"
 
 static spinlock_t a_lock;
 /**
@@ -419,43 +417,54 @@ QWORD process_systemcall(QWORD param1, QWORD param2, QWORD param3,
     break;
 
 // musl
+//#define MUSL_DEBUG
   case SYSCALL_sys_fstat:
     ret_code = sys_off_fstat((int) param1, (struct stat *) param2);
     break;
   case __NR_arch_prctl:
-    cs_printf("arch_prctl: code:%q addr:%q, id:%d\n", param1, param2, get_current()->id);
+
+#if 1
     ret_code =  sys_arch_prctl((int) param1, (unsigned long *) param2, NULL);
-    get_current()->tls = (void *) param2;
+#ifdef MUSL_DEBUG
+    cs_printf("arch_prctl(): code:%q, *addr:%q, tid:%d\n", param1, *(unsigned long *)param2, get_current()->id);
+#endif
+#else
+#define ARCH_SET_FS 0x1002
+    if((int) param1 == ARCH_SET_FS) {
+      get_current()->tls = (void *) param2;
+    }
+    ret_code = 0;
+#endif
     break ;
   case __NR_set_tid_address:
-    //ret_code = 0 ;
-    //cs_printf("set_tid_address: %q\n", param1);
-    //sys_arch_prctl((int) fs_flag, (unsigned long *) fs_addr, NULL);
-    cs_printf("set_tid_address: %q\n", param1);
     get_current()->clear_child_tid = (int *) param1;
-    
-    //sys_futex(get_current()->clear_child_tid, 0, *param1, NULL, NULL, 0);
     ret_code = get_current()->id;
+#ifdef MUSL_DEBUG
+    cs_printf("set_tid_address(): clear_child_tid:%q, tid:%d\n", param1, ret_code);
+#endif
     break ;
   case __NR_exit_group:
-    cs_printf("exit_group syscall: %q\n", param1);
     if(get_current()->clear_child_tid) {
-#define FUTEX_WAKE 1
-      //cs_printf("exit_group syscall: get_current()->tls:%q, &get_current()->tls:%q\n", get_current()->tls, &get_current()->tls);
+//#define FUTEX_WAKE 1
       *(int *)get_current()->clear_child_tid = 0;
       sys_futex(get_current()->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
+      sys_futex(get_current()->tls, FUTEX_WAKE, 1, NULL, NULL, 0);
     }
+#ifdef MUSL_DEBUG
+    cs_printf("exit_group(%d)\n", param1);
+#endif
     ret_code = 0 ;
     break ;
+
   case SYSCALL_get_syscall_handler:
     ret_code = (QWORD) process_systemcall ;
     break ;
+
   case __NR_readv:
     ret_code = sys_off_readv((int) param1, (void *) param2, (size_t) param3);
     break ;
+
   case __NR_writev:
-    //cs_printf("writev: fs: %q\n", getfs());
-    ret_code = 0 ;
     if ( param1 == 1 || param1 == 2 ) { //stdout, stderr
       ret_code = cs_writev((int) param1, (void *) param2, (size_t) param3);
     }
@@ -473,12 +482,7 @@ QWORD process_systemcall(QWORD param1, QWORD param2, QWORD param3,
     break ;
   case __NR_mmap:
     if((int)param5 == -1) { // fd == -1
-      //size_t len = (size_t) param2;
-      //cs_printf("mmap: len = %d, %q \n", (size_t) param2, (size_t) param2);
       ret_code = (QWORD) az_alloc((size_t) param2);
-      //cs_printf("mmap: param5 %d len = %d, addr = %q\n", (int) param5, param2, ret_code);
-      //cs_printf("mmap: p1: %q, p2: %d, p3: %d, p4: %d, p5 %d, p6 %d \n", param1, (int) param2, param3, param4, param5, param6);
-      //cs_printf("mmap: addr: %q, len: %d, prot: %d, flag: %d, fd %d, off %d \n", param1, param2, param3, param4, param5, param6);
     }
     else {
       ret_code = (QWORD) -1;
@@ -523,6 +527,13 @@ QWORD process_systemcall(QWORD param1, QWORD param2, QWORD param3,
   case __NR_sched_setscheduler :
     ret_code = 0;
     break ;
+  case __NR_get_thread_area :
+    //ret_code = get_current()->tls;
+    //ret_code = sys_get_thread_area((struct user_desc *)param1);;
+    break ;
+  case __NR_gettid:
+    ret_code = sys_getpid();
+    break;
   default:
     cs_printf("Invalid system calls: %d\n", no);
     printk("Invalid system calls");

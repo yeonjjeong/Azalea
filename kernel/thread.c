@@ -496,6 +496,7 @@ static void setup_thread(TCB * tcb, QWORD flags, QWORD entrypoint, void *stack_a
   *(--kstack) = GDT_KERNEL_DATA_SEGMENT | SELECTOR_RPL_0;       // DS
   *(--kstack) = GDT_KERNEL_DATA_SEGMENT | SELECTOR_RPL_0;       // ES
   *(--kstack) = GDT_KERNEL_DATA_SEGMENT | SELECTOR_RPL_0;       // FS
+
   *(--kstack) = GDT_KERNEL_DATA_SEGMENT | SELECTOR_RPL_0;       // GS
 
   // kernel context setup
@@ -532,14 +533,27 @@ int __thread_exit(int tid)
   atomic_set(&tcb->intention, THREAD_INTENTION_EXITED);
   tcb->name = THREAD_INIT_NAME;
 
+#if 1
+ if(tcb->clear_child_tid) {
+
+   uint8_t flags = irq_nested_disable();
+
+#define FUTEX_WAKE 1
+   sys_futex(tcb->tls, FUTEX_WAKE, 1, NULL, NULL, 0);
+   //int *state = (int *) ((unsigned long) tcb->tls + 0x40);
+   //*state = 0;
+
+   *(int *)(tcb->clear_child_tid) = 0;
+   sys_futex(tcb->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
+
+   //cs_printf("__thread_exit(): tid: %d, clear_chile_tid: %q, tls: %q state: %q\n", get_current()->id, get_current()->clear_child_tid, get_current()->tls, state);
+   irq_nested_enable(flags);
+ }
+#endif
+
   put_tcb(tcb);
 
 
- if(get_current()->clear_child_tid) {
-   *(int *)(get_current()->clear_child_tid) = 0;
-#define FUTEX_WAKE 1
-   sys_futex(get_current()->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
- }
 
   schedule(THREAD_INTENTION_EXITED);
 
@@ -553,6 +567,7 @@ int __thread_exit(int tid)
  */
 int thread_exit(TCB *tcb)
 {
+  //cs_printf("thread_exit(): \n");
   tcb->state = THREAD_STATE_EXITED;
   /*atomic_and(~THREAD_INTENTION_EXITED, &t->intention);*/
   atomic_set(&tcb->intention, atomic_get(&tcb->intention) & ~THREAD_INTENTION_EXITED);
@@ -1218,6 +1233,7 @@ void post_context_switch(TCB * prev)
         dl_list_del_init(&next_tcb->tcb_link);
 
         next_tcb->state = THREAD_STATE_READY;
+        refill_time_slice(next_tcb); // added
 	/*atomic_and(~THREAD_INTENTION_READY, &next_tcb->intention);*/
 	atomic_set(&next_tcb->intention, atomic_get(&next_tcb->intention) & 
 			~(THREAD_INTENTION_READY | THREAD_INTENTION_BLOCKED));
@@ -1309,6 +1325,7 @@ BOOL schedule(QWORD intention)
   TCB *next = NULL, *prev = NULL;
   int cid = -1;
   long consumed_time_slice = 0;
+  //int fs_index;
 
   curr = get_current();
   cid = curr->running_core;
@@ -1328,15 +1345,22 @@ BOOL schedule(QWORD intention)
   //cs_printf("curr id: %d, tls: %q \n", curr->id, curr->tls);
 
   next = select_next_thread();
+
+  //if(next->tls && next->id > 287) {
+    //cs_printf("(3)next id: %d, tls: %q \n", next->id, next->tls);
+    //fs_index = (next->id - 287) * sizeof(unsigned long);
+    //asm volatile("mov %0, %%fs:fs_index" :: "r"(next->tls) : "memory");
+  //}
+
   // if there is no or one thread in runnable list, next == curr
   if (next == curr) {
     refill_time_slice(curr);
     lapic_start_timer_oneshot(curr->remaining_time_slice);
 
-    if(curr->tls && curr->id > 287) {
+    //if(curr->tls && curr->id > 287) {
       //cs_printf("(2)curr id: %d, tls: %q \n", curr->id, curr->tls);
       //asm volatile("mov %0, %%fs:0" :: "r"(curr->tls) : "memory");
-    }
+    //}
 
     post_context_switch(curr);
     curr->state = THREAD_STATE_RUNNING;
@@ -1356,10 +1380,6 @@ BOOL schedule(QWORD intention)
   next->running_core = cid;
   running_thread[get_apic_id()] = next;
 
-  if(curr->tls && curr->id > 287) {
-    //cs_printf("(3)curr id: %d, tls: %q \n", curr->id, curr->tls);
-    //asm volatile("mov %0, %%fs:0" :: "r"(curr->tls) : "memory");
-  }
 
   prev = context_switch(curr, next);
 
@@ -1521,6 +1541,20 @@ void start_idle_thread(int thread_type)
   while (!shutdown_kernel) {
     // CPU IDLE
     lk_print_xy(30, 23, "%d, %x", cid, cnt++);
+#if 0
+    int i = 0, j = 0;
+    TCB *next_tcb = NULL, *tmp_ptr = NULL;
+    for(i = 0; i < 2; i++) {
+      //lk_print_xy(10, i, "runnalbe: %d ", runnable_list[i].count); 
+      int loc = 0;
+      lk_print_xy(loc, j, "blockedlist: %d ", blocked_list[i].count); 
+      dl_list_for_each_safe(next_tcb, tmp_ptr, &blocked_list[i].tcb_list, TCB, tcb_link) {
+        loc = loc + 5;
+        lk_print_xy(loc, j, " %d", next_tcb->id); 
+      }
+      j = 10;
+    }
+#endif
     
     // check all user thread done.
     if(thread_type == THREAD_TYPE_BSP) {
@@ -1561,12 +1595,14 @@ void set_core(TCB *tcb, core_set_t *cst, int core)
 void do_exit(int arg)
 {
 
+#if 1
  if(get_current()->clear_child_tid) {
    *(int *)(get_current()->clear_child_tid) = 0;
 #define FUTEX_WAKE 1
    sys_futex(get_current()->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
  }
   __thread_exit(arg);
+#endif
 }
 
 /**
@@ -1639,6 +1675,8 @@ int sys_setprio(tid_t *id, int prio)
 void sys_exit(int arg)
 {
   // To be implemented
+  //cs_printf("sys_exit(): arg=%d\n", arg);
+  __thread_exit(arg);
 }
 
 /**
@@ -1652,29 +1690,16 @@ void sys_exit(int arg)
 #define CLONE_CHILD_CLEARTID    	0x00200000
 #define CLONE_CHILD_SETTID              0x01000000
 
-int sys_clone(unsigned long clone_flags, void *stack, int *ptid, int *ctid, void *arg, void *ep)
+//int sys_clone(unsigned long clone_flags, void *stack, int *ptid, int *ctid, void *arg, void *ep)
+int sys_clone(unsigned long clone_flags, void *arg, int *ptid, int *ctid, void *tls, void *ep)
 {
   tid_t tid;
-  TCB *tcb = get_current();
+  //TCB *tcb = get_current();
 
   void *set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? ctid : NULL;
   void *clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? ctid : NULL;
 
-  tcb->set_child_tid = set_child_tid;
-  tcb->clear_child_tid = clear_child_tid;
-
-  cs_printf("\nsys_clone(): set_child_tid %q, clear_chile_tid %q\n", (QWORD) set_child_tid, (QWORD) clear_child_tid);
-
-  cs_printf("sys_clone(): tls: %q\n", (QWORD) arg);
-  //tcb->tls = (void *) arg;
-
-  asm volatile("mov %0, %%fs:0" :: "r"(arg) : "memory");
-
-  tid = clone_thread((QWORD) ep, (QWORD) stack+0x10, -1, set_child_tid, clear_child_tid, arg);
-
-  cs_printf("sys_clone(id:%d): clone_flags: %q, stack:%q, ptid: %q, ctid: %q, arg: %q, ep:%q \n", tid, (QWORD) clone_flags, (QWORD)stack, (QWORD) ptid, (QWORD) ctid, (QWORD) arg, (QWORD)ep);
-
-  //cs_printf("\nsys_clone ptid addr: %q, ptid: %q \n", (QWORD) ptid, (QWORD) *ptid);
+  tid = clone_thread((QWORD) ep, (QWORD) arg+0x10, -1, set_child_tid, clear_child_tid, tls);
 
   if(tid) {
 
@@ -1688,6 +1713,7 @@ int sys_clone(unsigned long clone_flags, void *stack, int *ptid, int *ctid, void
       }
     }
 
+  //cs_printf("sys_clone(id:%d): clone_flags: %q, arg:%q, *ptid: %d, ctid: %q, tls: %q, ep:%q \n", tid, (QWORD) clone_flags, (QWORD)arg, *ptid, (QWORD) ctid, (QWORD) tls, (QWORD)ep);
     return tid;
   }
   else {

@@ -1,7 +1,10 @@
+#include <sys/lock.h>
+
 #include "arch_prctl.h"
 #include "processor.h"
 #include "errno.h"
 #include "console.h"
+#include "thread.h"
 
 #define ARCH_SET_GS			0x1001
 #define ARCH_SET_FS			0x1002
@@ -32,7 +35,8 @@ int sys_arch_prctl(int option, unsigned long *arg2, unsigned long *addr) {
 
 		case ARCH_SET_FS:
 			//writefs((uint64_t)arg2);
-			asm volatile("mov %0, %%fs:0" :: "r"(arg2) : "memory");
+			//asm volatile("mov %0, %%fs:0" :: "r"(arg2) : "memory");
+			get_current()->tls = arg2;
 			return 0;
 
 		case ARCH_GET_GS: {
@@ -42,8 +46,9 @@ int sys_arch_prctl(int option, unsigned long *arg2, unsigned long *addr) {
 		}
 
 		case ARCH_GET_FS: {
-			unsigned long fs_val = readfs();
-			*arg2 = fs_val;
+			//unsigned long fs_val = readfs();
+			//*arg2 = fs_val;
+			*arg2 = (unsigned long) get_current()->tls;
 			return 0;
 		}
 

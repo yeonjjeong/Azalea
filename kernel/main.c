@@ -26,6 +26,7 @@
 
 static void main_for_ap(void);
 BOOL start_ap(void);
+extern void futex_init(void);
 
 extern QWORD g_vcon_addr;
 extern int g_ap_ready;
@@ -176,6 +177,8 @@ void Main(int boot_mode)
   lk_print_xy(0, yloc, "Remove low identical mapping.................[    ]");
   remove_low_identical_mapping(CONFIG_KERNEL_PAGETABLE_ADDRESS);
   lk_print_xy(xloc, yloc++, "Pass");
+
+  futex_init();
 
 #ifdef	OFFLOAD_ENABLE
   // init offload console channel
