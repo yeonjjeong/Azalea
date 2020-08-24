@@ -27,7 +27,6 @@
 #include "arch_prctl.h"
 #include "ioctl.h"
 #include "rt_sigaction.h"
-#include "thread_area.h"
 
 static spinlock_t a_lock;
 /**
