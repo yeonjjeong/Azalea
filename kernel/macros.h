@@ -11,6 +11,8 @@
 #define likelyval(x,val)	(x)
 #endif /* __GNUC__ < 3 */
 
+#define BUILTIN_EXPECT(exp, b)  __builtin_expect((exp), (b))
+
 #define DECLARE_PERCPU(type, name)	\
 type name[MAX_PROCESSOR_COUNT] __attribute__ ((aligned (64)))
 

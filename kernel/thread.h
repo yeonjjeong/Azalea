@@ -147,6 +147,7 @@ typedef struct thread_control_block_struct {
   QWORD user_stack;
   QWORD stack_base;
   QWORD id;
+  QWORD parent;
   DWORD gen;
   QWORD flags;
   WORD running_core;
@@ -182,7 +183,7 @@ typedef struct thread_control_block_struct {
 
 // Functions
 int create_thread(QWORD ip, QWORD argv, int core_mask);
-int create_thread_with_stack(QWORD ip, QWORD argv, QWORD stack, int core_mask);
+int clone_thread(QWORD ip, QWORD argv, int core_mask, void *set_child_tid, void *clear_child_tid, void* tls);
 
 void sched_init(void);
 void thread_init(void);

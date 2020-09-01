@@ -18,6 +18,7 @@ typedef struct __futex_q {
 	int* futex;
 	//TO_DO: waiters wille be changed dl_list
 	int waiters[MAX_TASKS];
+	int waiters_count;
 	struct __futex_q* next;
 	struct __futex_q* prev;
 } futex_q;

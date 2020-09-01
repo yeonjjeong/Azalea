@@ -533,29 +533,19 @@ int __thread_exit(int tid)
   atomic_set(&tcb->intention, THREAD_INTENTION_EXITED);
   tcb->name = THREAD_INIT_NAME;
 
-#if 1
- if(tcb->clear_child_tid) {
+  // wake thread at clear_child_tid 
+  uint8_t flags = irq_nested_disable();
 
-   uint8_t flags = irq_nested_disable();
-
-#define FUTEX_WAKE 1
-   sys_futex(tcb->tls, FUTEX_WAKE, 1, NULL, NULL, 0);
-   //int *state = (int *) ((unsigned long) tcb->tls + 0x40);
-   //*state = 0;
-
-   *(int *)(tcb->clear_child_tid) = 0;
-   sys_futex(tcb->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
-
-   //cs_printf("__thread_exit(): tid: %d, clear_chile_tid: %q, tls: %q state: %q\n", get_current()->id, get_current()->clear_child_tid, get_current()->tls, state);
-   irq_nested_enable(flags);
- }
-#endif
+  if(tcb->clear_child_tid) {
+    *(int *)(tcb->clear_child_tid) = 0;
+    sys_futex(tcb->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
+  }
 
   put_tcb(tcb);
 
-
-
   schedule(THREAD_INTENTION_EXITED);
+
+  irq_nested_enable(flags);
 
   return 0;
 }
@@ -760,6 +750,16 @@ int create_thread(QWORD ip, QWORD argv, int core_mask)
 }
 
 
+/**
+ * @brief clone thread
+ * @param ip - instruction point
+ * @param argv - parameter want to pass to created thread
+ * @param core_mask - masking info. for allocation core
+ * @param ptid - address to store child id
+ * @param ctid - address to clear child id
+ * @param tls - address to thread list lock
+ * return id of the created thread, fail (-1)
+ */
 int clone_thread(QWORD ip, QWORD argv, int core_mask, void *set_child_tid, void *clear_child_tid, void* tls)
 {
   TCB *thr = NULL;
@@ -788,6 +788,7 @@ int clone_thread(QWORD ip, QWORD argv, int core_mask, void *set_child_tid, void 
   thr->running_core = core_mask;
   set_core(thr, &cst, core_mask);
 
+  thr->parent = get_current()->id;
   thr->set_child_tid = set_child_tid;
   thr->clear_child_tid =  clear_child_tid;
   thr->tls = tls;
@@ -1233,7 +1234,6 @@ void post_context_switch(TCB * prev)
         dl_list_del_init(&next_tcb->tcb_link);
 
         next_tcb->state = THREAD_STATE_READY;
-        refill_time_slice(next_tcb); // added
 	/*atomic_and(~THREAD_INTENTION_READY, &next_tcb->intention);*/
 	atomic_set(&next_tcb->intention, atomic_get(&next_tcb->intention) & 
 			~(THREAD_INTENTION_READY | THREAD_INTENTION_BLOCKED));
@@ -1589,20 +1589,12 @@ void set_core(TCB *tcb, core_set_t *cst, int core)
 
 /**
  * @brief Do exit
- * @param arg - target TCB to exit
+ * @param arg - status
  * @return none
  */
 void do_exit(int arg)
 {
-
-#if 1
- if(get_current()->clear_child_tid) {
-   *(int *)(get_current()->clear_child_tid) = 0;
-#define FUTEX_WAKE 1
-   sys_futex(get_current()->clear_child_tid, FUTEX_WAKE, 1, NULL, NULL, 0);
- }
-  __thread_exit(arg);
-#endif
+  __thread_exit(get_current()->id);
 }
 
 /**
@@ -1675,50 +1667,9 @@ int sys_setprio(tid_t *id, int prio)
 void sys_exit(int arg)
 {
   // To be implemented
-  //cs_printf("sys_exit(): arg=%d\n", arg);
-  __thread_exit(arg);
-}
 
-/**
- * @brief Clone systemcall
- * @param id - id of the thread
- * @param ep - entrypoint (instruction point)
- * @param argv - parameters want to pass to create thread
- * @return Success (0), fail (-1)
- */
-#define CLONE_VM                        0x00000100
-#define CLONE_CHILD_CLEARTID    	0x00200000
-#define CLONE_CHILD_SETTID              0x01000000
-
-//int sys_clone(unsigned long clone_flags, void *stack, int *ptid, int *ctid, void *arg, void *ep)
-int sys_clone(unsigned long clone_flags, void *arg, int *ptid, int *ctid, void *tls, void *ep)
-{
-  tid_t tid;
-  //TCB *tcb = get_current();
-
-  void *set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? ctid : NULL;
-  void *clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? ctid : NULL;
-
-  tid = clone_thread((QWORD) ep, (QWORD) arg+0x10, -1, set_child_tid, clear_child_tid, tls);
-
-  if(tid) {
-
-    if(ptid) {
-     *(unsigned int *)ptid = tid;
-    }
-
-    if(clone_flags & CLONE_CHILD_SETTID) {
-      if (ctid) {
-        *(int *)ctid = tid;
-      }
-    }
-
-  //cs_printf("sys_clone(id:%d): clone_flags: %q, arg:%q, *ptid: %d, ctid: %q, tls: %q, ep:%q \n", tid, (QWORD) clone_flags, (QWORD)arg, *ptid, (QWORD) ctid, (QWORD) tls, (QWORD)ep);
-    return tid;
-  }
-  else {
-    return -1;
-  }
+  // exit thread
+  do_exit(arg);
 }
 
 
