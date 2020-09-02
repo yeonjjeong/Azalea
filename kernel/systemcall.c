@@ -418,6 +418,12 @@ QWORD process_systemcall(QWORD param1, QWORD param2, QWORD param3,
     cs_printf("arch_prctl(): code:%q, *addr:%q, tid:%d\n", param1, *(unsigned long *)param2, get_current()->id);
 #endif
     break ;
+  case __NR_clock_getres:
+    ret_code = sys_clock_getres((clockid_t) param1, (struct timespec *) param2);
+    break ;
+  case __NR_clock_gettime:
+    ret_code = sys_clock_gettime((clockid_t) param1, (struct timespec *) param2);
+    break ;
   case __NR_exit_group:
     sys_exit_group((int) param1);
 #ifdef DEBUG
@@ -526,7 +532,7 @@ QWORD process_systemcall(QWORD param1, QWORD param2, QWORD param3,
   case __NR_getdents64:
     ret_code = (int) sys_getdents((unsigned int) param1, (struct dirent *) param2, (unsigned int) param3);
     break ;
-  case __NR_sched_setscheduler :
+  case __NR_sched_setscheduler:
     ret_code = 0;
     break ;
 

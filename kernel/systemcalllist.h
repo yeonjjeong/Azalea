@@ -63,7 +63,8 @@
 #define SYSCALL_sys_yield               525
 #define SYSCALL_sys_kill                526
 #define SYSCALL_sys_signal              527
-#define SYSCALL_sys_gettimeofday        529
+//#define SYSCALL_sys_gettimeofday        528
+#define SYSCALL_sys_gettimeofday        __NR_gettimeofday
 
 
 #define SYSCALL_do_exit                 550

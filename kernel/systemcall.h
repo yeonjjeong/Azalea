@@ -40,6 +40,8 @@ typedef unsigned short umode_t;
 //typedef uint32_t socklen_t;
 
 int sys_arch_prctl(int option, unsigned long *arg2, unsigned long *addr);
+int sys_clock_getres (clockid_t clock_id, struct timespec *res);
+int sys_clock_gettime (clockid_t clock_id, struct timespec *tp);
 int sys_clone(unsigned long clone_flags, void *stack, int *ptid, int *ctid, void *tls, void *ep);
 void sys_exit_group(int arg);
 int sys_getegid(void);
