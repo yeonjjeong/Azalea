@@ -469,21 +469,30 @@ ssize_t sys_brk(ssize_t val)
 {
   ssize_t ret = 0;
 
-  spinlock_lock(&heap_lock);
-  ret = heap_end;
+  lk_print("brk(0): val=%q, head_end=%q\n", val, heap_end);
 
-  if ((heap_end >= HEAP_START) && (heap_end < HEAP_START + HEAP_SIZE)) {
+  if(!val) {
+    return heap_end;
+  }
+
+  spinlock_lock(&heap_lock);
+  ret = (ssize_t) heap_end;
+
+  if ((val >= (ssize_t) HEAP_START) && (val < (ssize_t) (HEAP_START + HEAP_SIZE))) {
     heap_end = val;
 
     if (PAGE_FLOOR(heap_end) > PAGE_FLOOR(ret)) {
       // Do something of VMA
     }
-    ret = 0;
-  } else {
-    ret = -1;
+    ret = val;
+  }
+  else {
+    ret = -ENOMEM;
   }
 
   spinlock_unlock(&heap_lock);
+
+  lk_print("brk(0): val=%q, head_end=%q\n", ret, heap_end);
 
   return ret;
 }
