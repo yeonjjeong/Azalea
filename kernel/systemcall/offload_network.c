@@ -301,3 +301,60 @@ int sys_off_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 
   return fd;
 }
+
+
+ssize_t sys_off_recv(int sockfd, void *buf, size_t len, int flags)
+{
+  channel_t *ch = NULL;
+  struct circular_queue *icq = NULL;
+  struct circular_queue *ocq = NULL;
+
+  TCB *current = NULL;
+  int mytid = -1;
+  ssize_t ssret = 0;
+
+  // Get the channel for communicating with the driver
+  ch = get_offload_channel(-1);
+  if(ch == NULL || buf == NULL)
+    return (-1);
+  icq = ch->in;
+  ocq = ch->out;
+
+  current = get_current();
+  mytid = current->id;
+
+  // Offload the function to the driver and receive the result
+  send_offload_message(ocq, mytid, SYSCALL_sys_recv, sockfd, get_pa((QWORD) buf), len, flags, 0, 0);
+  ssret = (ssize_t) receive_offload_message(icq, mytid, SYSCALL_sys_recv);
+
+  return ssret;
+
+}
+
+ssize_t sys_off_send(int sockfd, const void *buf, size_t len, int flags)
+{
+  channel_t *ch = NULL;
+  struct circular_queue *icq = NULL;
+  struct circular_queue *ocq = NULL;
+
+  TCB *current = NULL;
+  int mytid = -1;
+  ssize_t ssret= -1;
+
+  // Get the channel for communicating with the driver
+  ch = get_offload_channel(-1);
+  if(ch == NULL || buf == NULL)
+    return (-1);
+  icq = ch->in;
+  ocq = ch->out;
+
+  current = get_current();
+  mytid = current->id;
+
+  // Offload the function to the driver and receive the result
+  send_offload_message(ocq, mytid, SYSCALL_sys_send, sockfd, get_pa((QWORD) buf), len, flags, 0, 0);
+  ssret = (ssize_t) receive_offload_message(icq, mytid, SYSCALL_sys_send);
+
+  return ssret;
+
+}

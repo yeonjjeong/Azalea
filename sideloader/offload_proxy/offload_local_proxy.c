@@ -164,6 +164,13 @@ job_args_t *job_args = NULL;
     case SYSCALL_sys3_rewinddir:
        sys3_off_rewinddir(job_args);
        break;
+    case SYSCALL_sys_recv:
+       sys_off_recvfrom(job_args);
+       break;
+    case SYSCALL_sys_send:
+       sys_off_sendto(job_args);
+       break;
+
     default :
        printf("function type: unknown[%d]\n", (int) in_pkt->io_function_type);
        break;

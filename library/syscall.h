@@ -182,6 +182,8 @@ int sys_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 int sys_listen(int sockfd, int backlog);
 int sys_connect(int sockfd, struct sockaddr *addr, socklen_t addrlen);
 int sys_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+ssize_t recv(int sockfd, void *buf, size_t len, int flags);
+ssize_t send(int sockfd, const void *buf, size_t len, int flags);
 
 int print_log(char *msg);
 char *sys3_getcwd(char *buf, size_t size);

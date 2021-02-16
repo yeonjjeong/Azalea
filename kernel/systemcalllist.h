@@ -67,6 +67,8 @@
 #define SYSCALL_sys_listen              606
 #define SYSCALL_sys_connect             607
 #define SYSCALL_sys_accept              608
+#define SYSCALL_sys_recv                609
+#define SYSCALL_sys_send                610
 
 #define SYSCALL_get_start_tsc           901
 #define SYSCALL_get_freq                902

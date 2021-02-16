@@ -13,5 +13,7 @@ void sys_off_bind(job_args_t *job_args);
 void sys_off_listen(job_args_t *job_args);
 void sys_off_connect(job_args_t *job_args);
 void sys_off_accept(job_args_t *job_args);
+void sys_off_recvfrom(job_args_t *job_args);
+void sys_off_sendto(job_args_t *job_args);
 
 #endif /* __OFFLOAD_NETWORK_H__ */

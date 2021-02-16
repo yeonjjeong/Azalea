@@ -68,6 +68,9 @@ _syscall3(int, sys_bind, int, sockfd, const struct sockaddr *, addr, socklen_t, 
 _syscall2(int, sys_listen, int, sockfd, int, backlog);
 _syscall3(int, sys_connect, int, sockfd, struct sockaddr *, addr, socklen_t, addrlen);
 _syscall3(int, sys_accept, int, sockfd, struct sockaddr *, addr, socklen_t *, addrlen);
+_syscall4(int, sys_recv, int, sockfd, void *, buf, size_t, len, int, flags);
+_syscall4(int, sys_send, int, sockfd, const void *, buf, size_t, len, int, flags);
+
 
 _syscall1(int, print_log, char*, msg);
 _syscall2(char *, sys3_getcwd, char *, buf, size_t, size);

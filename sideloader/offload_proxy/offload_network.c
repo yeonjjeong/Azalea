@@ -354,3 +354,105 @@ void sys_off_accept(job_args_t *job_args)
   send_offload_message(out_cq, tid, offload_function_type, (unsigned long) iret);
   pthread_mutex_unlock(&ch->mutex);
 }
+
+void sys_off_recvfrom(job_args_t *job_args)
+{
+  struct circular_queue *out_cq = NULL;
+  io_packet_t *in_pkt = NULL;
+  int tid = 0;
+  int offload_function_type = 0;
+  int sockfd = 0;
+  void *buf = NULL;
+  size_t len = 0;
+  int flags = 0;
+  struct sockaddr *src_addr = NULL;
+  socklen_t *addrlen = NULL;
+  ssize_t ssret = -1;
+
+  // Get the queue information
+  struct channel_struct *ch;
+  ch = job_args->ch;
+  out_cq = job_args->ch->out_cq;
+  in_pkt = (io_packet_t *) &job_args->pkt;
+
+    //fprintf(stderr, "recvfrom(): enter\n");
+
+  // Receive parameters passed from the queue
+  tid = (int) in_pkt->tid;
+  offload_function_type = (int) in_pkt->io_function_type;
+  sockfd = (int) in_pkt->param1;
+  buf = (void *) get_va(in_pkt->param2);
+  len = (size_t) in_pkt->param3;
+  flags = (int) in_pkt->param4;
+  if((struct sockaddr *)in_pkt->param5 != NULL && (socklen_t *)in_pkt->param6 != NULL) {
+    fprintf(stderr, "recvfrom(): enter\n");
+    src_addr = (struct sockaddr *) get_va(in_pkt->param5);
+    addrlen = (socklen_t *) get_va(in_pkt->param6);
+    ssret = recvfrom(sockfd, buf, len, flags, src_addr, addrlen);
+  }
+  else {
+    fprintf(stderr, "recv(): enter\n");
+    ssret = recv(sockfd, buf, len, flags);
+  }
+
+  // Execute accept systemcall
+  //ssret = recvfrom(sockfd, buf, len, flags, src_addr, addrlen);
+  if(ssret == -1)
+      fprintf(stderr, "%s\n", strerror(errno));
+
+  // Sent to the result to the kernel
+  pthread_mutex_lock(&ch->mutex);
+  send_offload_message(out_cq, tid, offload_function_type, (unsigned long) ssret);
+  pthread_mutex_unlock(&ch->mutex);
+}
+
+void sys_off_sendto(job_args_t *job_args)
+{
+  struct circular_queue *out_cq = NULL;
+  io_packet_t *in_pkt = NULL;
+  int tid = 0;
+  int offload_function_type = 0;
+  int sockfd = 0;
+  const void *buf = NULL;
+  size_t len = 0;
+  int flags = 0;
+  const struct sockaddr *dest_addr = NULL;
+  socklen_t addrlen = NULL;
+  ssize_t ssret = -1;
+    fprintf(stderr, "sendto(): enter\n");
+
+  // Get the queue information
+  struct channel_struct *ch;
+  ch = job_args->ch;
+  out_cq = job_args->ch->out_cq;
+  in_pkt = (io_packet_t *) &job_args->pkt;
+
+  // Receive parameters passed from the queue
+  tid = (int) in_pkt->tid;
+  offload_function_type = (int) in_pkt->io_function_type;
+  sockfd = (int) in_pkt->param1;
+  buf = (const void *) get_va(in_pkt->param2);
+  len = (size_t) in_pkt->param3;
+  flags = (int) in_pkt->param4;
+  if((const struct sockaddr *)in_pkt->param5 != NULL && (socklen_t)in_pkt->param6 != 0) {
+    fprintf(stderr, "sendto(): sockfd:%d len:%d flags:%d\n", sockfd, (int)len, flags);
+    dest_addr = (const struct sockaddr *) get_va(in_pkt->param5);
+    addrlen = (socklen_t) in_pkt->param6;
+    ssret = sendto(sockfd, buf, len, flags, dest_addr, addrlen);
+  }
+  else {
+    fprintf(stderr, "send(): sockfd:%d len:%d flags:%d\n", sockfd, (int)len, flags);
+    ssret = send(sockfd, buf, len, flags);
+  }
+
+  // Execute accept systemcall
+  //ssret = recvfrom(sockfd, buf, len, flags, src_addr, addrlen);
+  if(ssret == -1)
+      //fprintf(stderr, "%s\n", strerror(errno));
+      fprintf(stderr, "sendto(): %s\n", strerror(errno));
+
+  // Sent to the result to the kernel
+  pthread_mutex_lock(&ch->mutex);
+  send_offload_message(out_cq, tid, offload_function_type, (unsigned long) ssret);
+  pthread_mutex_unlock(&ch->mutex);
+}

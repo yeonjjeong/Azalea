@@ -374,6 +374,22 @@ QWORD process_systemcall(QWORD param1, QWORD param2, QWORD param3,
   case SYSCALL_sys_accept:
     ret_code = sys_off_accept((int)param1, (struct sockaddr *)param2, (socklen_t *)param3);
     break;
+  case SYSCALL_sys_recv:
+    if((struct sockaddr *)param5 == NULL && (int)param4 == 0) {
+      ret_code = sys_off_recv((int)param1, (void *)param2, (size_t)param3, (int)param4);
+    }
+    else {
+      //ret_code = sys_off_recvfrom((int)param1, (void *)param2, (size_t)param3, (int)param4, (struct sockaddr *)param5, (socklen_t *)param6);
+    }
+    break;
+  case SYSCALL_sys_send:
+    if((struct sockaddr *)param5 == NULL) {
+      ret_code = sys_off_send((int)param1, (const void *)param2, (size_t)param3, (int)param4);
+    }
+    else {
+      //ret_code = sys_off_sendto((int)param1, (const void *)param2, (size_t)param3, (int)param4, (const struct sockaddr *)param5, (socklen_t)param6);
+    }
+    break;
   case SYSCALL_sys3_getcwd:
     ret_code = (QWORD) sys3_off_getcwd((char *)param1, (size_t)param2);
     break;
